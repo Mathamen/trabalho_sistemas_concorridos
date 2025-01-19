@@ -19,9 +19,12 @@ class Process:
             time.sleep(random.uniform(0, self.k))
 
             req_msg = f"REQUEST|{self.process_id}|{int(time.time()*1000)}"
-            client_socket.send(req_msg.encode())
-            client_socket.settimeout(200)
-
+            try:
+                client_socket.send(req_msg.encode())
+                client_socket.settimeout(200)
+            except:
+                pass
+            
             try:
                 resp = client_socket.recv(1024).decode()
                 if resp.startswith("GRANT"):
@@ -34,11 +37,19 @@ class Process:
 
                     release_msg = f"RELEASE|{self.process_id}|{int(time.time()*1000)}"
                     client_socket.send(release_msg.encode())
+                elif resp.startswith("SHUTDOWN"):
+                    print(f"Process {self.process_id}: Encerrando cliente ao receber SHUTDOWN.")
+                    break
                 else:
                     print(f"{self.process_id} recebeu resposta inesperada: {resp}")
             except socket.timeout:
                 print(f"{self.process_id} - Timeout esperando GRANT")
             except Exception as e:
-                print(f"{self.process_id} - Erro: {e}")
-
+                if e.errno == 10038:  # Ignorar se o erro for relacionado a socket inválido
+                    pass
+                elif e.errno == 10053:  # Ignorar se o erro for relacionado a socket inválido
+                   pass
+                else:
+                    print(f"{self.process_id} - Erro: {e}")
+            
         client_socket.close()
