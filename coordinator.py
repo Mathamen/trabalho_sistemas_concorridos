@@ -26,7 +26,6 @@ class Coordinator:
         print("Coordinator: running...")
         threading.Thread(target=self.accept_connections, daemon=True).start()
         threading.Thread(target=self.interface_thread, daemon=True).start()
-        self.process_requests()
 
     def accept_connections(self):
         while self.is_running:
@@ -49,44 +48,61 @@ class Coordinator:
                     parts = data.split("|")
                     msg_type = parts[0]
                     process_id = parts[1]
+                    
                     if msg_type == "REQUEST":
                         with self.lock:
                             self.connections[process_id] = client_socket
                             self.request_queue.put(process_id)
-                        self.log_msg("RECEIVED", data, client_socket.getpeername())
+                            self.log_msg("RECEIVED", data, client_socket.getpeername())
+                            
+                            # Verificar se não tem alguem esperando e enviar GRANT
+                            if self.current_process is None:
+                                if not self.request_queue.empty():
+                                    proc_id = self.request_queue.get()
+                                    sock = self.connections.get(proc_id)
+                                    if sock:
+                                        try:
+                                            grant_msg = f"GRANT|{proc_id}|{int(time.time()*1000)}"
+                                            sock.send(grant_msg.encode())
+                                            self.log_msg("SENT", grant_msg, sock.getpeername())
+                                            self.current_process = proc_id
+                                            self.process_count[proc_id] = self.process_count.get(proc_id, 0) + 1
+                                        except Exception as e:
+                                            pass
+                    
                     elif msg_type == "RELEASE":
                         with self.lock:
                             self.log_msg("RECEIVED", data, client_socket.getpeername())
                             if self.current_process == process_id:
                                 self.current_process = None
+                                
+                                
+                                if not self.request_queue.empty():
+                                    proc_id = self.request_queue.get()
+                                    sock = self.connections.get(proc_id)
+                                    if sock:
+                                        try:
+                                            grant_msg = f"GRANT|{proc_id}|{int(time.time()*1000)}"
+                                            sock.send(grant_msg.encode())
+                                            self.log_msg("SENT", grant_msg, sock.getpeername())
+                                            self.current_process = proc_id
+                                            self.process_count[proc_id] = self.process_count.get(proc_id, 0) + 1
+                                        except Exception as e:
+                                            pass
+                    
                     elif data.startswith("SHUTDOWN"):
                         break
+                    
                     else:
                         self.log_msg("UNKNOWN", data, client_socket.getpeername())
-                except:
+                
+                except Exception as e:
                     break
         finally:
             with self.lock:
                 if client_socket in self.active_sockets:
                     self.active_sockets.remove(client_socket)
             client_socket.close()
-
-    def process_requests(self):
-        while self.is_running:
-            with self.lock:
-                if not self.current_process and not self.request_queue.empty():
-                    proc_id = self.request_queue.get()
-                    sock = self.connections.get(proc_id)
-                    if sock:
-                        try:
-                            grant_msg = f"GRANT|{proc_id}|{int(time.time()*1000)}"
-                            sock.send(grant_msg.encode())
-                            self.log_msg("SENT", grant_msg, sock.getpeername())
-                            self.current_process = proc_id
-                            self.process_count[proc_id] = self.process_count.get(proc_id, 0) + 1
-                        except:
-                            pass
-            time.sleep(0.05)
 
     def interface_thread(self):
         while True:
